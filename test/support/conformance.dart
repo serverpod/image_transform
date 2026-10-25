@@ -1,41 +1,20 @@
-@Tags(['vips'])
-library;
-
 import 'dart:io';
-import 'dart:typed_data';
 
 import 'package:image_transform/image_transform.dart';
 import 'package:test/test.dart';
+
+import 'inspect.dart';
 
 const _fixtures = 'test/fixtures';
 
 ImageInput _fixture(String name) => ImageInput.file('$_fixtures/$name');
 
-/// Header of encoded bytes, via `vipsheader -a`.
-Map<String, String> _header(Uint8List bytes) {
-  final dir = Directory.systemTemp.createTempSync('image_transform_test_');
-  try {
-    final file = File('${dir.path}/image')..writeAsBytesSync(bytes);
-    final result = Process.runSync('vipsheader', ['-a', file.path]);
-    expect(result.exitCode, 0, reason: '${result.stderr}');
-    final fields = <String, String>{};
-    for (final line in '${result.stdout}'.split('\n').skip(1)) {
-      final i = line.indexOf(': ');
-      if (i > 0) fields[line.substring(0, i)] = line.substring(i + 2).trim();
-    }
-    return fields;
-  } finally {
-    dir.deleteSync(recursive: true);
-  }
-}
-
-void main() {
+/// The conformance suite (specs/05 §5.2), run once per backend.
+void runConformance(BackendPreference backend, BackendKind kind) {
   late ImageTransformer t;
 
   setUpAll(() async {
-    t = await ImageTransformer.create(
-      const TransformerConfig(backend: BackendPreference.cli),
-    );
+    t = await ImageTransformer.create(TransformerConfig(backend: backend));
   });
   tearDownAll(() => t.close());
 
@@ -51,7 +30,7 @@ void main() {
   }
 
   test('backend info', () {
-    expect(t.info.kind, BackendKind.cli);
+    expect(t.info.kind, kind);
     expect(t.info.vipsVersion, matches(RegExp(r'^8\.\d+\.\d+$')));
     expect(t.info.reasons, isNotEmpty);
   });
@@ -113,7 +92,8 @@ void main() {
           isA<UnsupportedFormatException>().having(
             (e) => e.detectedLoader,
             'loader',
-            startsWith('tiffload'),
+            // The FFI backend blocks non-allowed loaders, so it can't name it.
+            anyOf(isNull, startsWith('tiffload')),
           ),
         ),
       );
@@ -178,9 +158,9 @@ void main() {
         (out.width, out.height, out.format, out.clamped),
         (100, 75, ImageFormat.webp, false),
       );
-      final header = _header(out.bytes!);
-      expect(header['vips-loader'], 'webpload');
-      expect(header.keys.where((k) => k.startsWith('exif')), isEmpty);
+      final fields = header(out.bytes!);
+      expect(fields['vips-loader'], startsWith('webpload'));
+      expect(fields.keys.where((k) => k.startsWith('exif')), isEmpty);
     });
 
     test('EXIF orientations are applied', () async {
@@ -281,8 +261,9 @@ void main() {
         'alpha.png',
         const ImageOutput(name: 'a', encode: Encode.jpeg(quality: 80)),
       );
-      final header = _header(out.bytes!);
-      expect((header['vips-loader'], header['bands']), ('jpegload', '3'));
+      final fields = header(out.bytes!);
+      expect(fields['vips-loader'], startsWith('jpegload'));
+      expect(fields['bands'], '3');
     });
 
     test('PNG keeps alpha, palette works', () async {
@@ -290,7 +271,7 @@ void main() {
         'alpha.png',
         const ImageOutput(name: 'a', encode: Encode.png()),
       );
-      expect(_header(png.bytes!)['bands'], '4');
+      expect(header(png.bytes!)['bands'], '4');
       final palette = await one(
         'landscape.jpg',
         const ImageOutput(
@@ -298,14 +279,14 @@ void main() {
           encode: Encode.png(palette: true, colors: 16),
         ),
       );
-      expect(_header(palette.bytes!)['palette'], '1');
+      expect(header(palette.bytes!)['palette'], '1');
     });
 
     test('CMYK and 16-bit grey become 8-bit WebP', () async {
       final cmyk = await one('cmyk.jpg', const ImageOutput(name: 'a'));
-      expect(_header(cmyk.bytes!)['interpretation'], 'srgb');
+      expect(header(cmyk.bytes!)['interpretation'], 'srgb');
       final grey = await one('grey16.png', const ImageOutput(name: 'a'));
-      expect(_header(grey.bytes!)['format'], 'uchar');
+      expect(header(grey.bytes!)['format'], 'uchar');
     });
 
     test('MetadataPolicy.all keeps EXIF with a reset orientation', () async {
@@ -314,9 +295,9 @@ void main() {
         const ImageOutput(name: 'a', encode: Encode.jpeg()),
         options: const TransformOptions(metadata: MetadataPolicy.all),
       );
-      final header = _header(out.bytes!);
-      expect(header['orientation'], '1');
-      expect(header.keys.where((k) => k.startsWith('exif')), isNotEmpty);
+      final fields = header(out.bytes!);
+      expect(fields['orientation'], '1');
+      expect(fields.keys.where((k) => k.startsWith('exif')), isNotEmpty);
     });
   });
 
@@ -328,7 +309,7 @@ void main() {
           const ImageOutput(name: 'a', resize: Resize.fit(width: 100)),
         );
         expect((out.width, out.height, out.frames), (100, 50, 4));
-        expect(_header(out.bytes!)['n-pages'], '4');
+        expect(header(out.bytes!)['n-pages'], '4');
       });
     }
 
@@ -355,34 +336,16 @@ void main() {
           'animated.gif',
           ImageOutput(name: 'a', resize: Resize.cover(w, h)),
         );
-        final dir = Directory.systemTemp.createTempSync(
-          'image_transform_test_',
-        );
-        try {
-          final file = File('${dir.path}/anim.webp')
-            ..writeAsBytesSync(out.bytes!);
-          for (var i = 0; i < 4; i++) {
-            final pixel = Process.runSync('vips', [
-              'getpoint',
-              '${file.path}[page=$i]',
-              '${w ~/ 2}',
-              '${h ~/ 2}',
-            ]);
-            final channels = '${pixel.stdout}'.trim().split(' ').map(int.parse);
-            final want = expected[i].split(' ').map(int.parse);
-            final pairs = [
-              for (final (j, c) in channels.indexed) (c, want.elementAt(j)),
-            ];
-            for (final (got, exp) in pairs) {
-              expect(
-                (got - exp).abs(),
-                lessThan(8),
-                reason: '${w}x$h frame $i',
-              );
-            }
+        for (var i = 0; i < 4; i++) {
+          final channels = pixel(out.bytes!, i, w ~/ 2, h ~/ 2);
+          final want = expected[i].split(' ').map(int.parse).toList();
+          for (var j = 0; j < want.length; j++) {
+            expect(
+              (channels[j] - want[j]).abs(),
+              lessThan(8),
+              reason: '${w}x$h frame $i',
+            );
           }
-        } finally {
-          dir.deleteSync(recursive: true);
         }
       }
     });
@@ -497,6 +460,7 @@ void main() {
     });
 
     test('temp files are cleaned up', () async {
+      if (kind != BackendKind.cli) return markTestSkipped('CLI only');
       final base = Directory.systemTemp.createTempSync(
         'image_transform_cleanup_',
       );
@@ -534,6 +498,7 @@ void main() {
     });
 
     test('process timeouts', () async {
+      if (kind != BackendKind.cli) return markTestSkipped('CLI only');
       final slow = await ImageTransformer.create(
         const TransformerConfig(
           backend: BackendPreference.cli,
@@ -554,7 +519,7 @@ void main() {
 
     test('closed transformers reject calls', () async {
       final closed = await ImageTransformer.create(
-        const TransformerConfig(backend: BackendPreference.cli),
+        TransformerConfig(backend: backend),
       );
       await closed.close();
       expect(() => closed.probe(_fixture('landscape.jpg')), throwsStateError);
@@ -572,24 +537,20 @@ void main() {
   });
 
   group('backend selection', () {
-    test('ffi is not available yet', () {
-      expect(
-        ImageTransformer.create(
-          const TransformerConfig(backend: BackendPreference.ffi),
-        ),
-        throwsA(isA<BackendUnavailableException>()),
-      );
-    });
     test('missing CLI gives actionable reasons', () {
+      if (kind != BackendKind.cli) return;
       expect(
         ImageTransformer.create(
-          const TransformerConfig(cli: CliConfig(vips: '/nonexistent/vips')),
+          const TransformerConfig(
+            backend: BackendPreference.cli,
+            cli: CliConfig(vips: '/nonexistent/vips'),
+          ),
         ),
         throwsA(
           isA<BackendUnavailableException>().having(
             (e) => e.reasons.join('\n'),
             'reasons',
-            allOf(contains('ffi:'), contains('cli:')),
+            contains('cli:'),
           ),
         ),
       );

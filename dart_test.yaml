@@ -2,3 +2,7 @@ tags:
   vips:
     # Requires the libvips CLI (`vips`, `vipsheader`) >= 8.15 on PATH.
     timeout: 2x
+  ffi:
+    # Requires the native libvips from the build hook (native/out/<target>/,
+    # library_dir, or the release download).
+    timeout: 2x

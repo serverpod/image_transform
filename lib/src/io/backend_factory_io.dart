@@ -1,27 +1,26 @@
 import '../backend.dart';
 import '../exceptions.dart';
+import '../ffi/ffi_backend.dart';
 import '../options.dart';
 import '../types.dart';
 import 'cli_backend.dart';
 
-const _ffiUnavailable = 'ffi: FFI backend not implemented yet (milestone L2)';
-
-/// Picks and creates a backend (spec 03 §3.4).
+/// Picks and creates a backend (specs/03 §3.4).
 Future<TransformBackend> createBackend(TransformerConfig config) async {
   switch (config.backend) {
     case BackendPreference.ffi:
-      throw const BackendUnavailableException(
-        'FFI backend not implemented yet (milestone L2)',
-        reasons: [_ffiUnavailable],
-      );
+      return FfiBackend.create(config);
     case BackendPreference.cli:
       return CliBackend.create(config);
     case BackendPreference.auto:
+      final List<String> reasons;
       try {
-        return await CliBackend.create(
-          config,
-          reasons: const [_ffiUnavailable],
-        );
+        return await FfiBackend.create(config);
+      } on BackendUnavailableException catch (e) {
+        reasons = e.reasons;
+      }
+      try {
+        return await CliBackend.create(config, reasons: reasons);
       } on BackendUnavailableException catch (e) {
         throw BackendUnavailableException(
           'No image_transform backend is available',
