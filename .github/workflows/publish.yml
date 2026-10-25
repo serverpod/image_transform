@@ -1,0 +1,21 @@
+# Publishes to pub.dev when a version tag is pushed, using pub.dev's
+# automated publishing (GitHub OIDC, no stored credentials).
+#
+# One-time setup, after the first version has been published by hand:
+# pub.dev → image_transform → Admin → Automated publishing → enable GitHub
+# Actions for repository `serverpod/image_transform` with tag pattern
+# `v{{version}}`.
+#
+# Release: bump `version` in pubspec.yaml, add a CHANGELOG entry, then
+#   git tag v0.1.1 && git push origin v0.1.1
+name: publish
+
+on:
+  push:
+    tags: ['v[0-9]+.[0-9]+.[0-9]+*']
+
+jobs:
+  publish:
+    permissions:
+      id-token: write
+    uses: dart-lang/setup-dart/.github/workflows/publish.yml@v1

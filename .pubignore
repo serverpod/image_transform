@@ -1,0 +1,11 @@
+# A .pubignore replaces .gitignore for publishing, so this repeats its rules.
+.dart_tool/
+pubspec.lock
+build/
+native/out/
+native/.cache/
+.DS_Store
+
+# Repository-only material.
+.github/
+specs/

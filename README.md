@@ -114,7 +114,7 @@ dart test -x vips -x ffi                 # unit tests only
 dart run tool/generate_fixtures.dart     # regenerate test/fixtures (needs vips)
 ```
 
-Specification: [`specs/`](specs/README.md).
+Specification: [`specs/`](https://github.com/serverpod/image_transform/blob/main/specs/README.md).
 
 ## License
 

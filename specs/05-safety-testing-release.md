@@ -38,7 +38,15 @@ truncated JPEG; non-images (PDF, SVG, TIFF, HEIC) → `UnsupportedFormatExceptio
 - Semver for the Dart API. Each release pins one native artifact release; `BackendInfo.nativeVersion` reports it.
 - Native updates (libvips or dependency security fixes) ship as **patch** releases when behaviour is unchanged, and as minor releases otherwise.
 - Release gates: all suites green, pub score 160/160, dartdoc on all public API, CHANGELOG entry, `THIRD_PARTY_NOTICES` regenerated.
-- Published by GitHub Actions (OIDC automated publishing) under the **serverpod.dev** verified publisher from tags `v<x.y.z>`. Native releases (`native-v…`) are published first.
+- Published by GitHub Actions (`.github/workflows/publish.yml`, OIDC automated publishing) under the **serverpod.dev** verified publisher from tags `v<x.y.z>`. The **first** version is published by hand (`dart pub publish`); automated publishing is then enabled on pub.dev for this repository with tag pattern `v{{version}}`. Native releases (`native-v…`) are published first.
+- CI gates (`.github/workflows/ci.yml`, every push and PR):
+  - `dart format`, `dart analyze --fatal-infos`, `dart pub publish --dry-run`, and the pub.dev score with pana (any lost point fails);
+  - unit tests on the minimum SDK (3.12.2) and on stable;
+  - analysis and tests with the runtime dependencies at their lower bounds;
+  - CLI conformance on macOS (Homebrew libvips), plus a non-blocking Ubuntu 8.15 job;
+  - FFI conformance on Linux x64/arm64, macOS arm64/x64 and Windows x64/arm64;
+  - an FFI run that downloads the library through the build hook;
+  - running the example.
 - Security fixes in bundled dependencies: a watch workflow (OSV/GitHub advisories on `native/versions.json`) opens an issue; the target is a patch release within 7 days for critical CVEs.
 
 ## 5.4 Documentation

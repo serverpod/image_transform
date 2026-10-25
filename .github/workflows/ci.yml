@@ -9,17 +9,65 @@ on:
 permissions:
   contents: read
 
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
 jobs:
-  analyze:
+  # Formatting, static analysis, package validation and the pub.dev score.
+  checks:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      # pana checks Flutter compatibility too, so it needs the Flutter SDK
+      # (which includes Dart).
+      - uses: subosito/flutter-action@v2
+        with:
+          channel: stable
+      - run: dart pub get
+      - name: Formatting
+        run: dart format --output=none --set-exit-if-changed .
+      - name: Static analysis
+        run: dart analyze --fatal-infos
+      - name: Package validation
+        run: dart pub publish --dry-run
+      - name: pub.dev score (pana)
+        run: |
+          dart pub global activate pana
+          # Fails if any points are lost.
+          dart pub global run pana --no-warning --exit-code-threshold 0 .
+
+  # Unit tests on the minimum supported SDK and on current stable.
+  unit:
+    name: unit (Dart ${{ matrix.sdk }})
+    runs-on: ubuntu-24.04
+    strategy:
+      fail-fast: false
+      matrix:
+        sdk: ['3.12.2', stable]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dart-lang/setup-dart@v1
+        with:
+          sdk: ${{ matrix.sdk }}
+      - run: dart pub get
+      - run: dart test -x vips -x ffi
+
+  # The lowest versions our runtime dependency constraints allow must still
+  # work. Only runtime dependencies are downgraded: old releases of the test
+  # tooling don't run on current SDKs. (The full-downgrade analysis is part
+  # of the pana score in `checks`.)
+  downgrade:
     runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v4
       - uses: dart-lang/setup-dart@v1
       - run: dart pub get
-      - run: dart format --output=none --set-exit-if-changed lib test tool hook
+      - run: dart pub downgrade code_assets crypto ffi hooks meta
       - run: dart analyze --fatal-infos
-      - name: Unit tests (no libvips needed)
-        run: dart test -x vips -x ffi
+      - run: dart test -x vips -x ffi
+      - name: FFI tests via the downloaded library
+        run: dart test -t ffi
 
   cli:
     runs-on: macos-15
@@ -47,13 +95,18 @@ jobs:
       - name: CLI conformance tests
         run: dart test -t vips --reporter expanded
 
+  # FFI conformance on every platform with a GitHub-hosted runner, using the
+  # library fetched from the pinned sharp-libvips build.
   ffi:
     name: ffi ${{ matrix.os }}
     runs-on: ${{ matrix.os }}
     strategy:
       fail-fast: false
       matrix:
-        os: [ubuntu-24.04, macos-15]
+        os: [ubuntu-24.04, ubuntu-24.04-arm, macos-15, macos-15-intel, windows-2025, windows-11-arm]
+    defaults:
+      run:
+        shell: bash
     steps:
       - uses: actions/checkout@v4
       - uses: dart-lang/setup-dart@v1
@@ -62,3 +115,29 @@ jobs:
         run: dart run tool/fetch_sharp_libvips.dart
       - name: FFI conformance tests
         run: dart test -t ffi --reporter expanded
+
+  # What a user gets: no local library, so the build hook downloads and
+  # verifies the release asset from native/manifest.json.
+  ffi-hook-download:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dart-lang/setup-dart@v1
+      - run: dart pub get
+      - name: No local library
+        run: test ! -e native/out
+      - name: FFI tests via the downloaded library
+        run: dart test -t ffi --reporter expanded
+
+  example:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dart-lang/setup-dart@v1
+      - run: dart pub get
+      - name: Run the example
+        run: |
+          dart run example/image_transform_example.dart test/fixtures/landscape.jpg "$RUNNER_TEMP/out"
+          for f in w480.webp w960.webp w1600.webp avatar.jpg; do
+            test -s "$RUNNER_TEMP/out/$f" || { echo "missing $f"; exit 1; }
+          done
