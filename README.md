@@ -6,11 +6,11 @@ produces any number of outputs: resized, smart-cropped, rotated upright,
 converted to sRGB, stripped of metadata (including GPS), and encoded as WebP,
 JPEG or PNG, with an optional tiny placeholder.
 
-> **Status: 0.1 (milestone L1).** The API is complete; only the **CLI
-> backend** is implemented. It needs the libvips command-line tools ≥ 8.15
-> (`brew install vips`, `apt install libvips-tools`). The in-process FFI
-> backend with bundled native libraries (all platforms including iOS and
-> Android) is next.
+> **Status: 0.1.** The API is complete, with two backends: an **in-process
+> FFI backend** with a **prebuilt libvips downloaded automatically** for
+> macOS, Linux and Windows (nothing to install), and a **CLI backend** that
+> runs the libvips command-line tools in child processes. iOS and Android
+> come later (they need our own libvips build).
 
 ## Quick start
 
@@ -40,6 +40,10 @@ Or, for the simple case:
 final webp = await transformBytes(bytes, resize: const Resize.fit(width: 1024));
 ```
 
+All work happens off the calling isolate (worker isolates for FFI, child
+processes for CLI), so it's safe to call from a Flutter UI or a server
+request handler.
+
 ## What it does by default
 
 | | Default |
@@ -50,7 +54,7 @@ final webp = await transformBytes(bytes, resize: const Resize.fit(width: 1024));
 | Colour | Converted to sRGB (CMYK, Display P3 and so on are honoured) |
 | Metadata | All stripped (EXIF incl. GPS, XMP, IPTC, ICC) |
 | Size | Never upscaled (`upscale: true` to allow) |
-| Untrusted input | Header-only probe with format allow-list, pixel/frame/byte limits and strict decoding before any pixels are decoded; libvips' untrusted loaders blocked |
+| Untrusted input | Header-only probe with format allow-list, pixel/frame/byte limits and strict decoding before any pixels are decoded; every other libvips loader blocked |
 
 ## Resizing
 
@@ -70,20 +74,53 @@ the other outputs aren't lost. libvips messages are sanitised (no file paths).
 
 ## Backends
 
-| Backend | Status | Isolation |
-|---------|--------|-----------|
-| CLI (`vips` child processes) | ✅ Linux, macOS, Windows | Each operation runs in its own process with a hard timeout. A crash or hang can't take your app down. Recommended for servers handling untrusted uploads. |
-| FFI (in-process, bundled libvips) | Planned (L2–L4) | Same process, lowest overhead; all native platforms including iOS and Android. |
+| Backend | Platforms | Isolation |
+|---------|-----------|-----------|
+| **FFI** (default) | macOS, Linux (glibc, musl), Windows; x64 and arm64 | In-process on a pool of worker isolates; lowest overhead. A libvips crash would take the process down. |
+| **CLI** | Linux, macOS, Windows with libvips ≥ 8.15 installed (`brew install vips`, `apt install libvips-tools`) | Each operation runs in its own process with a hard timeout. Recommended for servers handling untrusted uploads at scale. |
+
+`BackendPreference.auto` (the default) uses FFI when the native library is
+available, otherwise the CLI. `ImageTransformer.info.reasons` says why.
+
+## Native library (build hook)
+
+The package's build hook downloads a prebuilt libvips for the target from
+this repository's [GitHub releases](https://github.com/serverpod/image_transform/releases),
+verifies its SHA-256 and bundles it with your app (`dart run`, `dart test`,
+`dart build cli`, `flutter build`). Configure it in your app's `pubspec.yaml`:
+
+```yaml
+hooks:
+  user_defines:
+    image_transform:
+      libvips: bundled            # bundled (default) | system | none
+      library_dir: path/to/dir    # use your own libvips.{dylib,so,dll}
+      download_base_url: https:// # mirror of the release assets
+      allow_download: false       # never download
+      require_native: true        # fail the build instead of warning
+```
+
+- A failed download or an unsupported platform only logs a warning; the FFI backend is then unavailable and `auto` falls back to the CLI.
+- `libvips: none` skips the download (e.g. CLI-only servers).
+- **Use `dart build cli`, not `dart compile exe`:** `dart compile` doesn't support packages with build hooks.
 
 ## Development
 
 ```bash
-dart test            # unit tests + libvips conformance tests (needs vips on PATH)
-dart test -x vips    # unit tests only
-dart run tool/generate_fixtures.dart   # regenerate test/fixtures (needs vips)
+dart run tool/fetch_sharp_libvips.dart   # host libvips into native/out/ (used by the hook)
+dart test                                # everything (CLI tests need vips on PATH)
+dart test -t ffi                         # FFI backend only
+dart test -x vips -x ffi                 # unit tests only
+dart run tool/generate_fixtures.dart     # regenerate test/fixtures (needs vips)
 ```
+
+Specification: [`specs/`](specs/README.md).
 
 ## License
 
-BSD 3-Clause. libvips itself is LGPL-2.1-or-later. The CLI backend uses
-whatever libvips you've installed.
+The Dart code is BSD 3-Clause. The prebuilt native libraries are the
+[sharp-libvips](https://github.com/lovell/sharp-libvips) builds of libvips,
+repackaged unchanged, and are **LGPL-3.0-or-later** as a whole (components keep
+their own licences; see `THIRD_PARTY_NOTICES.md` in each native release, which
+also carries the corresponding source). The CLI backend uses whatever libvips
+you've installed.

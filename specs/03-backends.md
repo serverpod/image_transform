@@ -3,11 +3,11 @@
 | | FFI backend | CLI backend |
 |-|-------------|-------------|
 | How | libvips loaded in-process via `dart:ffi` (native assets) | Spawns `vips` / `vipsheader` child processes |
-| Platforms | Linux, macOS, Windows, iOS, Android | Linux, macOS, Windows (needs `dart:io` `Process`) |
+| Platforms | macOS, Linux (glibc, musl), Windows, x64 and arm64 (iOS/Android: later milestone L4) | Linux, macOS, Windows (needs `dart:io` `Process`) |
 | libvips source | Bundled prebuilt (default) or system library ([04](04-native-libraries.md)) | `vips` on `PATH` or configured paths (e.g. distro `libvips-tools`, Homebrew) |
 | Isolation | Same process. A libvips crash kills the app/server. | Separate process per operation. Crashes and hangs are contained. |
 | Timeouts | Cooperative (between steps; `vips_image_set_kill` in a later minor) | Hard: SIGKILL after `processTimeout` |
-| Inputs/outputs | In memory (bytes) or files | Files (bytes are spooled to temp files) |
+| Inputs/outputs | In memory (files are read into memory) | Files (bytes are spooled to temp files) |
 | Overhead | Lowest (no process spawn, no temp files) | ~5–20 ms per process plus disk I/O |
 | Best for | Flutter apps, desktop tools, trusted server input | Servers processing **untrusted** uploads; environments without a prebuilt for the target |
 
@@ -22,19 +22,24 @@ arm64 Apple platforms) and gives one uniform code path for every operation:
 
 ```
 op = vips_operation_new("thumbnail_buffer")
-g_object_set_property(op, "buffer", <GValue VipsBlob>)   // per input/option
-g_object_set_property(op, "width",  <GValue int>)
-op2 = vips_cache_operation_build(op)                      // runs the operation
-g_object_get_property(op2, "out", <GValue VipsImage>)    // read outputs
+g_object_set_property(op, "buffer", <GValue VipsBlob>)        // images, blobs, image arrays, strings
+vips_object_set_from_string(op, "width=640,size=down,…")      // every scalar option
+op2 = vips_cache_operation_build(op)                           // runs the operation
+g_object_get_property(op2, "out", <GValue VipsImage>)         // read outputs
 vips_object_unref_outputs(op2); g_object_unref(op2); g_object_unref(op)
 ```
 
-- Bindings are generated with `package:ffigen` from a curated header (`native/include/image_transform_vips.h`) that declares only the symbols we use: init/shutdown, error buffer, version, concurrency/cache/block controls, operation API, GValue helpers, blob/area helpers, header getters (`vips_image_get_width`, `vips_image_get_typeof`, `vips_image_get_int`, …) and `vips_foreign_find_load(_buffer)`. External functions use `@Native` with the package's code-asset ID, so the same Dart code works for bundled and system libraries.
-- A small internal Dart layer, `VipsOperation.call(name, {inputs})`, maps Dart values to GValues (int, double, bool, string, enum by nickname, `VipsImage`, `VipsBlob`, array of double/int).
-- **Ownership:** every GObject the Dart side holds is wrapped in a `Finalizable` with a `NativeFinalizer(g_object_unref)` as a safety net, and is released explicitly in `finally` blocks for predictable memory. Output blobs are copied into Dart `Uint8List`s and then `vips_area_unref`'d.
-- **Operations used:** `thumbnail` / `thumbnail_buffer` (fit, cover with libvips crops, shrink-on-load), `extract_area` (focal crops), `copy` (orientation-tag reset), `webpsave(_buffer)`, `jpegsave(_buffer)`, `pngsave(_buffer)`, and loader operations for the probe (`*load_buffer` with `access=sequential`, which reads the header lazily).
+- **Implemented (L2)** in `lib/src/ffi/`: `libvips.dart` (hand-written `@Native` bindings with `@DefaultAsset('package:image_transform/src/ffi/libvips.dart')`; only non-variadic functions), `vips.dart` (operations, GValues, header fields), `render.dart` (the render steps) and `ffi_backend.dart` (isolate pool).
+- **Scalar options go through `vips_object_set_from_string`** with the *same* option strings the CLI backend builds (`CliArgs.saveOptions`, thumbnail options), so both backends share one source of truth for option syntax. Only library-generated, validated values reach those strings. Images, blobs, image arrays (`arrayjoin`) and strings (`option_string`) travel as GValues.
+- **Header fields** come from `vips_image_get_fields` + `vips_image_get_as_string`; enum values are normalised to the nicknames `vipsheader` prints (`((VipsInterpretation) VIPS_INTERPRETATION_sRGB)` → `srgb`), so both backends share `imageInfoFromHeader`.
+- **Ownership:** sources are `VipsBlob`s (copied once per call into the worker that owns them); images and blobs are released explicitly in `finally` blocks, with a `NativeFinalizer` (`g_object_unref` / `vips_area_unref`) as a safety net. Output blobs are copied into Dart memory before the operation's outputs are released.
+- **Operations used:** `thumbnail_buffer` (fit, cover with libvips crops, the resize step of manual crops, placeholder), `extract_area` (focal crops and per-frame crops of animated images), `arrayjoin` (rejoining cropped frames), `webpsave_buffer` / `jpegsave_buffer` / `pngsave_buffer`, and `*load_buffer` with `access=sequential` for the header probe and for measuring outputs.
+- **Verified (L2):** `thumbnail_buffer` does not forward its own `fail_on` to the loader, so `fail_on=…` is also passed in the loader `option_string`. Because libvips decodes lazily, a truncated JPEG then fails during the *save* step; decode-looking errors from any step are reported as `DecodeException`, like the CLI backend.
 
 ### Process-global libvips setup (once per process, guarded)
+
+libvips setup is **not** safe to run on several threads at once (verified: concurrent `vips_init` + `vips_operation_block_set` from two isolates crashes). So `FfiBackend.create` runs it on the creating isolate before any worker starts, under a **process-wide lock** (an exclusively created `image_transform-<pid>.lock` file). The setup state (`init;<unblocked formats>`) is kept in the process environment (`g_setenv`) because isolate *groups* (e.g. parallel test suites) share libvips but not Dart statics; a second transformer therefore never re-blocks loaders another one unblocked.
+
 
 | Call | Value | Why |
 |------|-------|-----|
@@ -47,9 +52,9 @@ vips_object_unref_outputs(op2); g_object_unref(op2); g_object_unref(op)
 ### Isolates
 
 - libvips calls block, so the FFI backend runs them on a **pool of long-lived worker isolates**. Default size: 1 on iOS/Android, `max(1, cores ÷ 2)` elsewhere. libvips threads internally, so more isolates mostly add memory pressure.
-- Requests are queued FIFO and dispatched to idle isolates. Bytes cross isolate boundaries as `TransferableTypedData` (zero-copy).
+- Each prepared source is pinned to the least-loaded worker; probe, render (one request per output) and placeholder calls for that source go to the same worker, which owns its `VipsBlob`. Bytes cross isolate boundaries as `TransferableTypedData` (zero-copy). Workers process one request at a time.
 - Safe to use from Flutter's UI isolate; nothing blocks it. Works with iOS background tasks (no main-thread requirement).
-- `close()` drains the queue, then shuts the isolates down. libvips itself stays initialised for the process lifetime.
+- `close()` asks each worker to free its sources, then kills it. libvips itself stays initialised for the process lifetime.
 
 ### Cancellation and timeouts (FFI)
 

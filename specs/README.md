@@ -37,11 +37,11 @@ final avatarBytes = result['avatar'].bytes;
 |-------|----------|
 | Name | **`image_transform`**. It describes the whole job (decode → transform → encode), is engine-agnostic, matches Pixtronaut's "transformation" unit, and is free on pub.dev. |
 | Home | Own repository `github.com/serverpod/image_transform`, published to pub.dev under the **serverpod.dev** publisher. (Assumed; confirm.) |
-| Licence | Dart code **BSD-3-Clause** (like other Serverpod packages). Bundled native libvips is **LGPL-2.1-or-later**, and its dependencies keep their own permissive licences. No GPL components. |
+| Licence | Dart code **BSD-3-Clause** (like other Serverpod packages). Bundled native libvips (repackaged sharp-libvips) is **LGPL-3.0-or-later** as a whole; components keep their own licences (see the release's THIRD_PARTY_NOTICES.md). |
 | Platforms (v1) | **Linux** (x64, arm64; glibc and musl), **macOS** (arm64, x64), **Windows** (x64), **iOS** (device arm64, simulator arm64/x64), **Android** (arm64-v8a, x86_64). **Web is not supported** in v1: the package compiles for web, but `ImageTransformer.create()` throws `UnsupportedError`. (Assumed; confirm.) |
 | Formats (v1) | Decode **JPEG, PNG, WebP, GIF** (incl. animated). Encode **WebP** (incl. animated), **JPEG**, **PNG**. AVIF/HEIC are a planned opt-in build variant (v1.x). (Assumed; confirm.) |
 | Backends | **FFI** (default; libvips in-process through `dart:ffi`; every native platform) and **CLI** (spawns `vips`; process-isolated with hard timeouts; Linux/macOS/Windows only). Same API and semantics. |
-| Native binaries | Shipped through a **Dart build hook** (native assets). The default `bundled` mode downloads a pinned, checksum-verified prebuilt libvips for the target. A `system` mode uses an installed libvips, and `none` skips native code (CLI only). |
+| Native binaries | Shipped through a **Dart build hook** (native assets). The default `bundled` mode downloads a pinned, checksum-verified prebuilt libvips for the target from this repo's GitHub releases (**repackaged sharp-libvips**; macOS, Linux glibc/musl, Windows, x64 + arm64). A `system` mode uses an installed libvips, and `none` skips native code (CLI only). iOS/Android need our own build (L4). |
 | Threading | Every call is `async` and runs off the calling isolate (an isolate pool for FFI, child processes for CLI). This is safe to call from Flutter's UI isolate. |
 | Scope | A curated, high-level operation set, **not** a complete libvips binding. Escape hatches can be added later without breaking the API. |
 | SDK | Dart ≥ 3.10 and Flutter ≥ 3.38 (the first stable releases with build hooks; **verify** in L0). CI runs the current stable versions. |

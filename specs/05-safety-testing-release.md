@@ -53,10 +53,11 @@ truncated JPEG; non-images (PDF, SVG, TIFF, HEIC) → `UnsupportedFormatExceptio
 |---|-----------|-----------|
 | **L0** | Spikes | (a) libvips CLI behaviours: `fail_on` pass-through, multi-page `thumbnail --crop`, `keep=none`, `vipsheader` fields, on libvips 8.16; (b) FFI operation-API binding prototype on macOS with Homebrew libvips (`system` mode): probe + thumbnail + webpsave; (c) build-hook prototype: download + checksum + `CodeAsset` for macOS and Linux; check `user_defines`; (d) cross-compile libvips for Android arm64 and iOS arm64 and load them in a Flutter test app. The results are written back into this spec. |
 | **L1** | Core API + **CLI backend** | The full public API, planning, limits, the CLI backend, and the conformance suite on Linux/macOS. **This is what Pixtronaut's worker needs.** |
-| **L2** | FFI backend (system libvips) | FFI backend complete on Linux/macOS/Windows against the system libvips, passing conformance. Isolate pool, memory and concurrency suites green. |
-| **L3** | Bundled artifacts: desktop/server | Native pipeline for Linux (glibc/musl, x64/arm64), macOS and Windows. `bundled` mode is the default. Hook tests green. |
-| **L4** | Bundled artifacts: mobile | iOS and Android artifacts, the Flutter example app, and integration tests on simulator/emulator. Size budget met. |
+| **L2** ✅ | FFI backend | FFI backend through the generic operation API on an isolate pool, passing the shared conformance suite (40 tests + 5 FFI-specific: auto selection, isolate spread, non-blocking caller, flat memory over 350 calls, close). |
+| **L3** ✅ | Bundled artifacts: desktop/server | Repackaged sharp-libvips (libvips 8.18.7) for macOS, Linux (glibc + musl) and Windows, x64 + arm64, as the `native-v0.1.0` GitHub release; build hook downloads and verifies them; `bundled` is the default; per-OS smoke tests in `native.yml`. |
+| **L4** | Mobile + own builds | Build libvips ourselves (meson cross builds based on sharp-libvips' recipes) with the minimal loader set, for iOS and Android (16 KB pages) and optionally replacing the desktop builds; Flutter example app; integration tests on simulator/emulator; `LicenseRegistry` helper. |
 | **L5** | 1.0 | Docs, benchmarks, a fuzzing baseline, the licence helper, and publication on pub.dev. |
 
-Pixtronaut depends only on **L1** for its worker, so the library's mobile and
-FFI work runs in parallel with Pixtronaut and never blocks it.
+Pixtronaut's worker uses the CLI backend (process isolation for untrusted
+uploads); the `pixtronaut` package's local fallback uses `auto`, i.e. the FFI
+backend with the bundled libvips, so developers need nothing installed.
