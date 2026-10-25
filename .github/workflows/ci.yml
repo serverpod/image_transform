@@ -1,0 +1,50 @@
+name: ci
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  analyze:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dart-lang/setup-dart@v1
+      - run: dart pub get
+      - run: dart format --output=none --set-exit-if-changed lib test tool hook
+      - run: dart analyze --fatal-infos
+      - name: Unit tests (no libvips needed)
+        run: dart test -x vips -x ffi
+
+  cli:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dart-lang/setup-dart@v1
+      # Ubuntu 24.04 ships libvips 8.15, the minimum the CLI backend supports.
+      - name: Install libvips
+        run: sudo apt-get update && sudo apt-get install -y --no-install-recommends libvips-tools
+      - run: dart pub get
+      - name: CLI conformance tests
+        run: dart test -t vips --reporter expanded
+
+  ffi:
+    name: ffi ${{ matrix.os }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-24.04, macos-15]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dart-lang/setup-dart@v1
+      - run: dart pub get
+      - name: Fetch the host library
+        run: dart run tool/fetch_sharp_libvips.dart
+      - name: FFI conformance tests
+        run: dart test -t ffi --reporter expanded

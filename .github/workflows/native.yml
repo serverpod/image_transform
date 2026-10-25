@@ -1,0 +1,147 @@
+# Fetches the pinned sharp-libvips builds for every target, smoke-tests them
+# with the FFI conformance suite on each OS/arch, and (on native-v* tags)
+# publishes them as a GitHub release with native/manifest.json.
+name: native
+
+on:
+  push:
+    branches: [main]
+    tags: ['native-v*']
+    paths:
+      - 'native/**'
+      - 'lib/**'
+      - 'hook/**'
+      - 'test/**'
+      - 'tool/**'
+      - 'pubspec.yaml'
+      - '.github/workflows/native.yml'
+  pull_request:
+    paths:
+      - 'native/**'
+      - 'hook/**'
+      - 'lib/src/ffi/**'
+      - 'lib/src/native/**'
+      - 'tool/**'
+      - '.github/workflows/native.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  fetch:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dart-lang/setup-dart@v1
+      - run: dart pub get
+      - name: Fetch and verify sharp-libvips for every target
+        run: dart run tool/fetch_sharp_libvips.dart --all
+      - name: Upload libraries
+        uses: actions/upload-artifact@v4
+        with:
+          name: native-libraries
+          path: native/out/
+          if-no-files-found: error
+
+  smoke:
+    name: smoke ${{ matrix.target }}
+    needs: fetch
+    runs-on: ${{ matrix.runner }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { target: macos-arm64, runner: macos-15 }
+          - { target: macos-x64, runner: macos-15-intel }
+          - { target: linux-x64, runner: ubuntu-24.04 }
+          - { target: linux-arm64, runner: ubuntu-24.04-arm }
+          - { target: windows-x64, runner: windows-2025 }
+          - { target: windows-arm64, runner: windows-11-arm }
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dart-lang/setup-dart@v1
+      - uses: actions/download-artifact@v4
+        with:
+          name: native-libraries
+          path: native/out/
+      - name: Keep only this target's library
+        run: |
+          find native/out -mindepth 1 -maxdepth 1 -type d ! -name '${{ matrix.target }}' -exec rm -rf {} +
+          ls -la native/out/${{ matrix.target }}
+      - run: dart pub get
+      - name: FFI conformance tests
+        run: dart test -t ffi --reporter expanded
+
+  release:
+    if: startsWith(github.ref, 'refs/tags/native-v')
+    needs: smoke
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: main
+          fetch-depth: 0
+      - uses: dart-lang/setup-dart@v1
+      - run: dart pub get
+      - uses: actions/download-artifact@v4
+        with:
+          name: native-libraries
+          path: artifacts/
+
+      - name: Package assets and write manifest
+        run: |
+          dart run tool/make_manifest.dart --release "$GITHUB_REF_NAME" \
+            --input artifacts --output release-assets --repo "$GITHUB_REPOSITORY"
+
+      - name: Licences and corresponding source
+        run: |
+          version=$(jq -r .sharpLibvipsVersion native/sharp_libvips.json)
+          curl -sSfL -o "release-assets/sharp-libvips-v${version}-source.tar.gz" \
+            "https://github.com/lovell/sharp-libvips/archive/refs/tags/v${version}.tar.gz"
+          curl -sSfL -o release-assets/LGPL-3.0.txt https://www.gnu.org/licenses/lgpl-3.0.txt
+          curl -sSfL -o release-assets/GPL-3.0.txt https://www.gnu.org/licenses/gpl-3.0.txt
+          dart run tool/third_party_notices.dart artifacts release-assets/THIRD_PARTY_NOTICES.md
+
+      - name: Create release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          version=$(jq -r .sharpLibvipsVersion native/sharp_libvips.json)
+          vips=$(jq -r .vipsVersion native/sharp_libvips.json)
+          cat > notes.md <<NOTES
+          Prebuilt libvips ${vips} for image_transform, repackaged unchanged from
+          [sharp-libvips v${version}](https://github.com/lovell/sharp-libvips/releases/tag/v${version})
+          (npm \`@img/sharp-libvips-<platform>@${version}\`, verified against the npm SHA-512 integrity
+          pinned in \`native/sharp_libvips.json\`).
+
+          The image_transform build hook downloads these files and verifies them against
+          \`native/manifest.json\`. Each \`<target>-build-info.json\` records the source package,
+          its integrity hash and the bundled component versions.
+
+          **Licence:** the libraries are **LGPL-3.0-or-later** (libvips and its LGPL
+          dependencies; other components keep their own licences, see THIRD_PARTY_NOTICES.md).
+          The corresponding source is the sharp-libvips build recipe for v${version}
+          (\`sharp-libvips-v${version}-source.tar.gz\`, attached), which pins the upstream source
+          tarball of every component. image_transform's own Dart code is BSD-3-Clause.
+
+          **Smoke-tested** with the FFI conformance suite on macos-arm64, macos-x64, linux-x64,
+          linux-arm64, windows-x64 and windows-arm64. **linux-musl-x64 and linux-musl-arm64 are
+          published but not smoke-tested** (no Dart SDK for musl on GitHub runners).
+          NOTES
+          gh release create "$GITHUB_REF_NAME" release-assets/* \
+            --title "Native libraries $GITHUB_REF_NAME (libvips ${vips})" \
+            --notes-file notes.md
+
+      - name: Commit manifest
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add native/manifest.json
+          git commit -m "Update native manifest for $GITHUB_REF_NAME"
+          git push origin HEAD:main
