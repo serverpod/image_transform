@@ -1,6 +1,55 @@
 {
-  "release": null,
-  "baseUrl": null,
-  "vipsVersion": null,
-  "targets": {}
+  "release": "native-v0.1.0",
+  "baseUrl": "https://github.com/serverpod/image_transform/releases/download/native-v0.1.0/",
+  "vipsVersion": "8.18.7",
+  "targets": {
+    "macos-arm64": {
+      "file": "libvips.dylib",
+      "asset": "macos-arm64-libvips.dylib.gz",
+      "sha256": "c1a5b5633b21aeb8a229abf7d062e07e4d778c0b44ed43cd1f93362bda58c322",
+      "size": 18231688
+    },
+    "macos-x64": {
+      "file": "libvips.dylib",
+      "asset": "macos-x64-libvips.dylib.gz",
+      "sha256": "fb2101ad991f683a46204ea0ac96a4269c4c93ecef023a0f841c93ebc9843353",
+      "size": 20369624
+    },
+    "linux-x64": {
+      "file": "libvips.so",
+      "asset": "linux-x64-libvips.so.gz",
+      "sha256": "4aa73553408c3964071728f4a231a8e86918e39bc49f1fbae75355f7ea933ea9",
+      "size": 18699288
+    },
+    "linux-arm64": {
+      "file": "libvips.so",
+      "asset": "linux-arm64-libvips.so.gz",
+      "sha256": "97c2ae9a663cd3de58a34d68820994e49e0e261fddbd4616bd726a72610bbc8f",
+      "size": 18324712
+    },
+    "linux-musl-x64": {
+      "file": "libvips.so",
+      "asset": "linux-musl-x64-libvips.so.gz",
+      "sha256": "979b625437190a1970b835164e0e30d47dc60159ce6a394ce78cc40cb9d59ab8",
+      "size": 18911144
+    },
+    "linux-musl-arm64": {
+      "file": "libvips.so",
+      "asset": "linux-musl-arm64-libvips.so.gz",
+      "sha256": "26e2e3405ac4e9ad4dbad4d5ac60a448a76561388782104492aa15fe3a0c0509",
+      "size": 18712760
+    },
+    "windows-x64": {
+      "file": "libvips.dll",
+      "asset": "windows-x64-libvips.dll.gz",
+      "sha256": "06dab07cc386748513337a31672b1d5269fbc770a14ff403080575665bf0813f",
+      "size": 19018240
+    },
+    "windows-arm64": {
+      "file": "libvips.dll",
+      "asset": "windows-arm64-libvips.dll.gz",
+      "sha256": "c3ff47e1546127d60ca0964dcbe27541c0bf35517b97aca10dc6a82fb9c540b7",
+      "size": 16080896
+    }
+  }
 }
