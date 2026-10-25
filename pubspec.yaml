@@ -1,0 +1,23 @@
+name: image_transform
+description: >-
+  Fast, safe image transformations for Dart and Flutter, powered by libvips:
+  resize, smart crop, auto-orient, colour conversion, metadata stripping and
+  WebP/JPEG/PNG encoding in one call.
+version: 0.1.0
+publish_to: none
+repository: https://github.com/serverpod/image_transform
+topics:
+  - image
+  - image-processing
+  - libvips
+  - webp
+
+environment:
+  sdk: ^3.12.2
+
+dependencies:
+  meta: ^1.15.0
+
+dev_dependencies:
+  lints: ^6.0.0
+  test: ^1.25.0

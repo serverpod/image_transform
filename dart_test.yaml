@@ -1,0 +1,4 @@
+tags:
+  vips:
+    # Requires the libvips CLI (`vips`, `vipsheader`) >= 8.15 on PATH.
+    timeout: 2x

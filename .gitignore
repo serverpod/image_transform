@@ -1,0 +1,6 @@
+.dart_tool/
+pubspec.lock
+build/
+native/out/
+native/.cache/
+.DS_Store
