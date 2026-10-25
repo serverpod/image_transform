@@ -22,11 +22,25 @@ jobs:
         run: dart test -x vips -x ffi
 
   cli:
-    runs-on: ubuntu-24.04
+    runs-on: macos-15
     steps:
       - uses: actions/checkout@v4
       - uses: dart-lang/setup-dart@v1
-      # Ubuntu 24.04 ships libvips 8.15, the minimum the CLI backend supports.
+      - name: Install libvips (current release)
+        run: brew install vips && vips --version
+      - run: dart pub get
+      - name: CLI conformance tests
+        run: dart test -t vips --reporter expanded
+
+  # Ubuntu 24.04's libvips 8.15.1 has known problems (the CLI segfaults on
+  # per-frame crops of animated images, and PNG palettes need a quantiser it
+  # isn't built with). Kept for visibility; doesn't block.
+  cli-distro-8_15:
+    runs-on: ubuntu-24.04
+    continue-on-error: true
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dart-lang/setup-dart@v1
       - name: Install libvips
         run: sudo apt-get update && sudo apt-get install -y --no-install-recommends libvips-tools
       - run: dart pub get
