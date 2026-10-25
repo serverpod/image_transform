@@ -383,11 +383,13 @@ final class CliBackend implements TransformBackend {
       );
       return;
     }
-    // Rows are cropped inside each frame: extract each frame and rejoin.
+    // Rows are cropped inside each frame: extract each frame and rejoin. The
+    // frames are uncompressed TIFF, not .v: libvips 8.15's arrayjoin
+    // segfaults on .v inputs.
     final framePaths = <String>[];
     try {
       for (var i = 0; i < frames; i++) {
-        final framePath = 'frame-${planned.index}-$i.v';
+        final framePath = 'frame-${planned.index}-$i.tif';
         await _vips(
           CliArgs.extractArea(
             intermediate,

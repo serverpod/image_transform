@@ -101,7 +101,7 @@ of frames down to a single frame. `--size force` *is* frame-aware: every page
 is resized and `page-height` is updated. The library therefore does cover crops
 on animated input itself:
 1. resize with `--size force` to the cover size;
-2. crop with `extract_area`. That's one call over the whole stack when only columns are cut; when rows are cut, it's one call per frame plus `arrayjoin`.
+2. crop with `extract_area`. That's one call over the whole stack when only columns are cut; when rows are cut, it's one call per frame (to uncompressed TIFF, since libvips 8.15's `arrayjoin` segfaults on `.v` inputs) plus `arrayjoin`.
 3. save with `page_height=<box height>`.
 
 Delays and the loop count survive this path, including with `keep=none`.

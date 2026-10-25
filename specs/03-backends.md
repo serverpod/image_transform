@@ -76,6 +76,9 @@ vips thumbnail <src>[<load>] <out>.<ext>[<save>] <boxW> --height <boxH> --crop c
 # cover, focal crop or animated input (two steps via a .v intermediate)
 vips thumbnail <src>[<load>] <tmp>.v <resizedW> --height <resizedH> --size force --export-profile srgb --fail-on <level>
 vips extract_area <tmp>.v <out>.<ext>[<save>] <left> <top> <boxW> <boxH>
+# animated input with rows cut: crop each frame, then rejoin
+vips extract_area <tmp>.v <frame-i>.tif <left> <i*resizedH+top> <boxW> <boxH>
+vips arrayjoin "<frame-0>.tif <frame-1>.tif …" <out>.<ext>[<save>,page_height=<boxH>] --across 1
 ```
 
   - `<load>`: `n=-1` (preserve animation) or `n=1` (first frame), **only for GIF/WebP**. Other loaders reject unknown options such as `n` (`jpegload: no property named 'n'`).
@@ -85,7 +88,7 @@ vips extract_area <tmp>.v <out>.<ext>[<save>] <left> <top> <boxW> <boxH>
   - `<save>`: encoder options from [02 §2.6](02-semantics.md#26-encoders) plus `keep=none|icc|all`. **L0 finding:** `keep=none` removes all `exif-*` fields; `keep=all` keeps them, with `orientation` reset to 1 after auto-rotation. JPEG saves add `background=255`, because the default flattens alpha onto black.
   - All file names are relative, library-generated names, and every process runs with the call's temp directory as its working directory. User paths, which may contain spaces or `[`/`,` option syntax, never reach libvips: file inputs are symlinked (or copied) to `source`.
 - **Measure:** `vipsheader -a <out>` plus the file length. **L0 finding:** the field names are `width`, `height` (one page unless loaded with `n=-1`), `n-pages`, `page-height` (only with `n=-1`), `orientation`, `bands`, `interpretation` (`srgb`, `b-w`, `grey16`, `cmyk`, …), `vips-loader` and `icc-profile-data`. The first output line is a `file: summary` line and is skipped.
-- **Environment:** `VIPS_BLOCK_UNTRUSTED=1` for every process that reads the source, plus `VIPS_CONCURRENCY=<vipsThreads>` and `CliConfig.environment`. **L0 finding:** `VIPS_BLOCK_UNTRUSTED` also blocks `vipsload` (`.v` files) and `svgload`, so steps that read only the library's own `.v` intermediates run without it. SVGs aren't recognised at all, which gives a second layer of rejection.
+- **Environment:** `VIPS_BLOCK_UNTRUSTED=1` for every process that reads the source, plus `VIPS_CONCURRENCY=<vipsThreads>` and `CliConfig.environment`. **L0 finding:** `VIPS_BLOCK_UNTRUSTED` also blocks `vipsload` (`.v` files) and `svgload`, so steps that read only the library's own `.v` intermediates run without it. **CI finding:** `arrayjoin` segfaults on `.v` inputs in 8.15.1 (also with `VIPS_CONCURRENCY=1`), so per-frame crops are written as uncompressed TIFF. SVGs aren't recognised at all, which gives a second layer of rejection.
 - **Timeouts:** each process is killed (SIGKILL, or `TerminateProcess` on Windows) after `processTimeout` → `TransformTimeoutException`.
 - **Parallelism:** at most `workers` processes at once (default `max(1, cores ÷ 2)`).
 - **Temp files:** a per-call directory under `tempDirectory`, deleted in `finally`. Bytes inputs are written there, and bytes outputs are read back.

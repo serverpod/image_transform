@@ -43,7 +43,7 @@ truncated JPEG; non-images (PDF, SVG, TIFF, HEIC) → `UnsupportedFormatExceptio
   - `dart format`, `dart analyze --fatal-infos`, `dart pub publish --dry-run`, and the pub.dev score with pana (any lost point fails);
   - unit tests on the minimum SDK (3.12.2) and on stable;
   - analysis and tests with the runtime dependencies at their lower bounds;
-  - CLI conformance on macOS (Homebrew libvips), plus a non-blocking Ubuntu 8.15 job;
+  - CLI conformance on macOS (Homebrew libvips), and on Ubuntu 24.04's libvips 8.15.1 (the minimum supported version);
   - FFI conformance on Linux x64/arm64, macOS arm64/x64 and Windows x64/arm64;
   - an FFI run that downloads the library through the build hook;
   - running the example.
